@@ -1,0 +1,32 @@
+# 环境与密钥
+.env
+*.key
+config.local.*
+
+# 运行产物
+results/
+frames/
+*.jsonl
+summary.csv
+validation_report.md
+
+# 真实数据（只保留 *_template.csv）
+prompts.csv
+human_eval.csv
+videos/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.jpg
+*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store

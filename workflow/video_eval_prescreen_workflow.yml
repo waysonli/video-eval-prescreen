@@ -1,0 +1,684 @@
+app:
+  description: 视频版本评测自动化初筛工作流。输入抽帧图片与评测元信息，输出七维度初筛打分、规则校验结果与置信度分流建议。抽帧需在工作流外部完成。
+  icon: clapper-board
+  icon_background: '#EEEDFE'
+  mode: workflow
+  name: 视频评测自动化初筛 v0.1
+kind: app
+version: 0.1.5
+workflow:
+  environment_variables: []
+  features:
+    file_upload:
+      image:
+        enabled: true
+        number_limits: 8
+        transfer_methods:
+          - remote_url
+          - local_file
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+  graph:
+    edges:
+      - id: e-start-vlm
+        source: start
+        sourceHandle: source
+        target: vlm
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: start
+          targetType: llm
+      - id: e-vlm-parse
+        source: vlm
+        sourceHandle: source
+        target: parse
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: llm
+          targetType: code
+      - id: e-parse-rules
+        source: parse
+        sourceHandle: source
+        target: rules
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: code
+          targetType: code
+      - id: e-rules-judge
+        source: rules
+        sourceHandle: source
+        target: judge
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: code
+          targetType: llm
+      - id: e-judge-conf
+        source: judge
+        sourceHandle: source
+        target: conf
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: llm
+          targetType: code
+      - id: e-conf-end
+        source: conf
+        sourceHandle: source
+        target: finish
+        targetHandle: target
+        type: custom
+        data:
+          isInIteration: false
+          sourceType: code
+          targetType: end
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 40
+          y: 260
+        data:
+          type: start
+          title: 开始
+          desc: 接收外部抽帧结果与评测元信息
+          selected: false
+          variables:
+            - variable: frames
+              label: 关键帧图片
+              type: file-list
+              required: true
+              max_length: 8
+              allowed_file_types:
+                - image
+              allowed_file_upload_methods:
+                - remote_url
+                - local_file
+            - variable: sample_id
+              label: 样本ID
+              type: text-input
+              required: true
+              max_length: 64
+            - variable: prompt_text
+              label: 生成用Prompt原文
+              type: paragraph
+              required: true
+            - variable: scene_type
+              label: 场景类型
+              type: select
+              required: true
+              options:
+                - 通用视频
+                - 电商R2V
+            - variable: frame_meta
+              label: 抽帧元信息JSON
+              type: paragraph
+              required: false
+
+      - id: vlm
+        type: custom
+        position:
+          x: 340
+          y: 260
+        data:
+          type: llm
+          title: VLM 预标注
+          desc: 按封闭式提问清单读图，输出结构化观察结果
+          selected: false
+          model:
+            provider: openai
+            name: gpt-4o
+            mode: chat
+            completion_params:
+              temperature: 0.1
+              max_tokens: 1500
+          vision:
+            enabled: true
+            configs:
+              detail: high
+              variable_selector:
+                - start
+                - frames
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是视频生成质量评测的视觉观察助手。你将看到同一条视频按时间顺序抽取的多张关键帧。
+                你的任务是回答下面的封闭式问题清单，不做主观评价，不打分，只描述可观察到的客观事实。
+
+                【回答规则】
+                1. 只回答问题清单中的内容，不要自由发挥描述画面。
+                2. 无法从画面判断的项，值填写 "无法判断"，不要猜测。
+                3. 涉及程度的项，只能从给定档位中选择，不要自创描述。
+                4. 严格输出 JSON，不要包含 markdown 代码块标记、不要有任何前后说明文字。
+
+                【问题清单与输出格式】
+                {
+                  "subject_count": 整数,
+                  "subject_consistency": "一致" | "轻微变化" | "明显变化" | "主体丢失" | "无法判断",
+                  "consistency_detail": "简述观察到的变化部位，无变化填空字符串",
+                  "shot_cut_count": 整数,
+                  "shot_cut_detail": "简述切换发生在第几帧之间，无切换填空字符串",
+                  "camera_motion": "固定" | "推" | "拉" | "摇" | "移" | "跟" | "升降" | "无法判断",
+                  "structure_anomaly": "无" | "手部异常" | "肢体异常" | "面部异常" | "多处异常",
+                  "structure_detail": "简述异常位置，无异常填空字符串",
+                  "visible_text": "画面中可见文字内容，无则填空字符串",
+                  "text_garbled": true | false,
+                  "quality_degradation": "无" | "轻微" | "明显",
+                  "product_deformation": "不适用" | "无" | "轻微" | "明显",
+                  "product_part_missing": "不适用" | "无" | "有",
+                  "observation_certainty": "高" | "中" | "低"
+                }
+
+                【重要】observation_certainty 用于标记你自己判断的确定程度。
+                当帧数不足、画面模糊、或关键信息缺失导致你无法确信时，必须填 "低"，不要为了给出答案而勉强判断。
+            - role: user
+              text: |
+                样本ID: {{#start.sample_id#}}
+                场景类型: {{#start.scene_type#}}
+                生成用Prompt: {{#start.prompt_text#}}
+                抽帧元信息: {{#start.frame_meta#}}
+
+                请按系统提示中的问题清单，观察以上关键帧并输出 JSON。
+                注意: 若场景类型为「通用视频」，product_deformation 与 product_part_missing 两项填 "不适用"。
+
+      - id: parse
+        type: custom
+        position:
+          x: 640
+          y: 260
+        data:
+          type: code
+          title: 字段结构化
+          desc: 解析 VLM 输出并归一化为标准字段
+          selected: false
+          code_language: python3
+          variables:
+            - variable: vlm_raw
+              value_selector:
+                - vlm
+                - text
+            - variable: scene_type
+              value_selector:
+                - start
+                - scene_type
+          outputs:
+            fields:
+              type: object
+            parse_ok:
+              type: string
+            parse_msg:
+              type: string
+          code: |
+            import json
+            import re
+
+            def main(vlm_raw: str, scene_type: str) -> dict:
+                default_fields = {
+                    "subject_count": 0,
+                    "subject_consistency": "无法判断",
+                    "consistency_detail": "",
+                    "shot_cut_count": 0,
+                    "shot_cut_detail": "",
+                    "camera_motion": "无法判断",
+                    "structure_anomaly": "无",
+                    "structure_detail": "",
+                    "visible_text": "",
+                    "text_garbled": False,
+                    "quality_degradation": "无",
+                    "product_deformation": "不适用",
+                    "product_part_missing": "不适用",
+                    "observation_certainty": "低",
+                }
+
+                raw = (vlm_raw or "").strip()
+                raw = re.sub(r"^```(?:json)?", "", raw).strip()
+                raw = re.sub(r"```$", "", raw).strip()
+
+                match = re.search(r"\{.*\}", raw, re.S)
+                if not match:
+                    return {
+                        "fields": default_fields,
+                        "parse_ok": "false",
+                        "parse_msg": "VLM 输出中未找到 JSON 结构",
+                    }
+
+                try:
+                    parsed = json.loads(match.group(0))
+                except Exception as exc:
+                    return {
+                        "fields": default_fields,
+                        "parse_ok": "false",
+                        "parse_msg": "JSON 解析失败: " + str(exc)[:120],
+                    }
+
+                fields = dict(default_fields)
+                missing = []
+                for key in default_fields:
+                    if key in parsed and parsed[key] is not None:
+                        fields[key] = parsed[key]
+                    else:
+                        missing.append(key)
+
+                consistency_map = {
+                    "无变化": "一致",
+                    "基本一致": "一致",
+                    "略有变化": "轻微变化",
+                    "有变化": "明显变化",
+                    "严重变化": "明显变化",
+                }
+                value = str(fields.get("subject_consistency", ""))
+                if value in consistency_map:
+                    fields["subject_consistency"] = consistency_map[value]
+
+                for key in ("subject_count", "shot_cut_count"):
+                    try:
+                        fields[key] = int(fields[key])
+                    except Exception:
+                        fields[key] = 0
+
+                if isinstance(fields.get("text_garbled"), str):
+                    fields["text_garbled"] = fields["text_garbled"].strip().lower() in ("true", "是", "yes")
+
+                if scene_type != "电商R2V":
+                    fields["product_deformation"] = "不适用"
+                    fields["product_part_missing"] = "不适用"
+
+                msg = "解析成功"
+                if missing:
+                    msg = "解析成功，缺失字段已填默认值: " + ",".join(missing)
+
+                return {
+                    "fields": fields,
+                    "parse_ok": "true",
+                    "parse_msg": msg,
+                }
+
+      - id: rules
+        type: custom
+        position:
+          x: 940
+          y: 260
+        data:
+          type: code
+          title: 规则校验
+          desc: 硬性规则与逻辑一致性检查，红线优先
+          selected: false
+          code_language: python3
+          variables:
+            - variable: fields
+              value_selector:
+                - parse
+                - fields
+            - variable: parse_ok
+              value_selector:
+                - parse
+                - parse_ok
+            - variable: parse_msg
+              value_selector:
+                - parse
+                - parse_msg
+            - variable: scene_type
+              value_selector:
+                - start
+                - scene_type
+          outputs:
+            rule_status:
+              type: string
+            redline_hit:
+              type: string
+            rule_flags:
+              type: string
+            fields_json:
+              type: string
+          code: |
+            import json
+
+            def main(fields: dict, parse_ok: str, parse_msg: str, scene_type: str) -> dict:
+                flags = []
+                redlines = []
+
+                if parse_ok != "true":
+                    flags.append("解析失败: " + parse_msg)
+
+                consistency = fields.get("subject_consistency", "无法判断")
+                cut_count = fields.get("shot_cut_count", 0)
+                anomaly = fields.get("structure_anomaly", "无")
+                garbled = fields.get("text_garbled", False)
+                visible_text = fields.get("visible_text", "")
+                certainty = fields.get("observation_certainty", "低")
+                degradation = fields.get("quality_degradation", "无")
+
+                if anomaly in ("肢体异常", "多处异常"):
+                    redlines.append("人体结构崩坏")
+                if garbled and visible_text:
+                    redlines.append("文字乱码")
+                if scene_type == "电商R2V":
+                    if fields.get("product_deformation") == "明显":
+                        redlines.append("产品结构变形")
+                    if fields.get("product_part_missing") == "有":
+                        redlines.append("产品部件缺失")
+
+                if cut_count == 0 and consistency == "明显变化":
+                    flags.append("逻辑矛盾: 无镜头切换但主体明显变化")
+                if cut_count > 0 and fields.get("camera_motion") == "无法判断":
+                    flags.append("字段存疑: 存在切换但运镜无法判断")
+                if certainty == "低":
+                    flags.append("VLM 自评确定性低")
+                if consistency == "无法判断":
+                    flags.append("关键字段无法判断: 主体一致性")
+                if degradation == "明显":
+                    flags.append("画质明显衰减")
+
+                if redlines:
+                    status = "redline"
+                elif flags:
+                    status = "flagged"
+                else:
+                    status = "pass"
+
+                return {
+                    "rule_status": status,
+                    "redline_hit": ";".join(redlines) if redlines else "无",
+                    "rule_flags": ";".join(flags) if flags else "无",
+                    "fields_json": json.dumps(fields, ensure_ascii=False),
+                }
+
+      - id: judge
+        type: custom
+        position:
+          x: 1240
+          y: 260
+        data:
+          type: llm
+          title: LLM-as-Judge 初筛
+          desc: 依据评分卡锚点给出七维度粗分
+          selected: false
+          model:
+            provider: deepseek
+            name: deepseek-chat
+            mode: chat
+            completion_params:
+              temperature: 0
+              max_tokens: 1200
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是视频生成模型评测的初筛打分助手。你不能看到视频，只能依据下方提供的结构化观察字段与规则校验结果打分。
+                你的输出只作为初筛参考，最终结论由人工评测员给出。
+
+                【核心原则】
+                1. 只依据给定字段打分，不得脑补字段中没有的信息。
+                2. 字段值为「无法判断」或「不适用」的维度，分数填 0，并在依据中说明信息不足。
+                3. 打分必须严格对照下方评分卡锚点，不得自行放宽或收紧。
+                4. 你必须诚实标注自己的确定程度，宁可标低置信也不要给出勉强的判断。
+
+                【评分卡锚点（5 分制）】
+                主体一致性:
+                  5 = 一致，无任何漂移
+                  4 = 轻微变化，不影响识别
+                  3 = 可察觉的特征变化，需回看确认
+                  2 = 明显换形或换脸
+                  1 = 主体丢失或被替换
+                镜头语言:
+                  5 = 运镜准确，切换自然
+                  4 = 运镜基本准确，切换略生硬
+                  3 = 运镜方向可识别但不精确
+                  2 = 运镜与预期不符或切换跳变
+                  1 = 完全失控
+                结构与美学:
+                  5 = 无结构异常，构图完整
+                  4 = 细节瑕疵，不影响观感
+                  3 = 局部结构异常可察觉
+                  2 = 明显结构错误（手部、肢体）
+                  1 = 严重崩坏
+                画质稳定性:
+                  5 = 全程清晰稳定
+                  4 = 极轻微波动
+                  3 = 可察觉衰减
+                  2 = 明显衰减或闪烁
+                  1 = 严重劣化
+                文字渲染:
+                  5 = 文字清晰正确
+                  4 = 轻微字形瑕疵
+                  3 = 部分字符错误
+                  2 = 大面积乱码
+                  1 = 完全不可读
+                  0 = 画面无文字，不适用
+                指令遵循:
+                  依据 Prompt 与观察字段的要素匹配程度打分，要素齐全为 5，缺失一项降 1 分，缺失核心主体为 1
+
+                【输出格式】
+                严格输出 JSON，不带 markdown 标记，不带任何前后说明:
+                {
+                  "scores": {
+                    "指令遵循": 0-5,
+                    "主体一致性": 0-5,
+                    "镜头语言": 0-5,
+                    "结构与美学": 0-5,
+                    "画质稳定性": 0-5,
+                    "文字渲染": 0-5
+                  },
+                  "evidence": {
+                    "维度名": "一句话依据，必须引用具体字段值"
+                  },
+                  "self_certainty": "高" | "中" | "低",
+                  "uncertain_dims": ["因信息不足而不确定的维度名"]
+                }
+            - role: user
+              text: |
+                样本ID: {{#start.sample_id#}}
+                场景类型: {{#start.scene_type#}}
+                生成用Prompt: {{#start.prompt_text#}}
+
+                规则校验状态: {{#rules.rule_status#}}
+                红线命中: {{#rules.redline_hit#}}
+                规则标记: {{#rules.rule_flags#}}
+
+                结构化观察字段:
+                {{#rules.fields_json#}}
+
+                请依据评分卡输出 JSON。
+
+      - id: conf
+        type: custom
+        position:
+          x: 1540
+          y: 260
+        data:
+          type: code
+          title: 置信度分流
+          desc: 综合分数位置、依据确定性与规则标记计算路由
+          selected: false
+          code_language: python3
+          variables:
+            - variable: judge_raw
+              value_selector:
+                - judge
+                - text
+            - variable: rule_status
+              value_selector:
+                - rules
+                - rule_status
+            - variable: redline_hit
+              value_selector:
+                - rules
+                - redline_hit
+            - variable: rule_flags
+              value_selector:
+                - rules
+                - rule_flags
+            - variable: sample_id
+              value_selector:
+                - start
+                - sample_id
+          outputs:
+            route:
+              type: string
+            confidence:
+              type: string
+            review_dims:
+              type: string
+            result_json:
+              type: string
+          code: |
+            import json
+            import re
+
+            EDGE_LOW = 2.5
+            EDGE_HIGH = 3.5
+            HIGH_GOOD = 4.0
+            HIGH_BAD = 2.0
+            HEDGE_WORDS = ("可能", "也许", "不确定", "无法判断", "似乎", "大概", "推测")
+
+            def main(judge_raw: str, rule_status: str, redline_hit: str,
+                     rule_flags: str, sample_id: str) -> dict:
+                raw = (judge_raw or "").strip()
+                raw = re.sub(r"^```(?:json)?", "", raw).strip()
+                raw = re.sub(r"```$", "", raw).strip()
+                match = re.search(r"\{.*\}", raw, re.S)
+
+                scores = {}
+                evidence = {}
+                self_certainty = "低"
+                uncertain_dims = []
+                parse_note = "正常"
+
+                if match:
+                    try:
+                        parsed = json.loads(match.group(0))
+                        scores = parsed.get("scores", {}) or {}
+                        evidence = parsed.get("evidence", {}) or {}
+                        self_certainty = parsed.get("self_certainty", "低")
+                        uncertain_dims = parsed.get("uncertain_dims", []) or []
+                    except Exception as exc:
+                        parse_note = "Judge 输出解析失败: " + str(exc)[:100]
+                else:
+                    parse_note = "Judge 输出中未找到 JSON"
+
+                valid = {}
+                for dim, val in scores.items():
+                    try:
+                        num = float(val)
+                    except Exception:
+                        continue
+                    if num > 0:
+                        valid[dim] = num
+
+                review_dims = set(uncertain_dims)
+                for dim, text in evidence.items():
+                    if any(word in str(text) for word in HEDGE_WORDS):
+                        review_dims.add(dim)
+                for dim, num in valid.items():
+                    if EDGE_LOW <= num <= EDGE_HIGH:
+                        review_dims.add(dim)
+
+                if rule_status == "redline":
+                    route = "high_conf_bad"
+                    confidence = "高"
+                    reason = "命中红线: " + redline_hit
+                elif parse_note != "正常" or not valid:
+                    route = "edge_review"
+                    confidence = "低"
+                    reason = "初筛结果不可用，降级转人工: " + parse_note
+                elif self_certainty == "低" or rule_status == "flagged":
+                    route = "edge_review"
+                    confidence = "低"
+                    reason = "Judge 自评确定性低或存在规则标记: " + rule_flags
+                elif review_dims:
+                    route = "edge_review"
+                    confidence = "低"
+                    reason = "存在边界档位或依据含不确定表述的维度"
+                else:
+                    lowest = min(valid.values())
+                    average = sum(valid.values()) / len(valid)
+                    if lowest >= HIGH_GOOD:
+                        route = "high_conf_good"
+                        confidence = "高"
+                        reason = "各维度均不低于 %.1f 分" % HIGH_GOOD
+                    elif average <= HIGH_BAD:
+                        route = "high_conf_bad"
+                        confidence = "高"
+                        reason = "均分不高于 %.1f 分" % HIGH_BAD
+                    else:
+                        route = "edge_review"
+                        confidence = "中"
+                        reason = "分数分布跨档，转人工确认"
+
+                result = {
+                    "sample_id": sample_id,
+                    "route": route,
+                    "confidence": confidence,
+                    "reason": reason,
+                    "rule_status": rule_status,
+                    "redline_hit": redline_hit,
+                    "rule_flags": rule_flags,
+                    "scores": valid,
+                    "evidence": evidence,
+                    "review_dims": sorted(review_dims),
+                    "parse_note": parse_note,
+                }
+
+                return {
+                    "route": route,
+                    "confidence": confidence,
+                    "review_dims": ",".join(sorted(review_dims)) if review_dims else "无",
+                    "result_json": json.dumps(result, ensure_ascii=False),
+                }
+
+      - id: finish
+        type: custom
+        position:
+          x: 1840
+          y: 260
+        data:
+          type: end
+          title: 结束
+          desc: 输出初筛结果供标注平台路由
+          selected: false
+          outputs:
+            - variable: route
+              value_selector:
+                - conf
+                - route
+            - variable: confidence
+              value_selector:
+                - conf
+                - confidence
+            - variable: review_dims
+              value_selector:
+                - conf
+                - review_dims
+            - variable: result_json
+              value_selector:
+                - conf
+                - result_json
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

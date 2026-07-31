@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>视频评测自动化初筛工作流 Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f4f0;
+    color: #2c2c2a;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  .subtitle { font-size: 13px; color: #6b6a64; margin: 0 0 20px; }
+  .demo-note {
+    background: #fdf3e3; border: 1px solid #f0d9a8; border-radius: 8px;
+    padding: 10px 14px; font-size: 12.5px; color: #7a5a10; margin-bottom: 20px;
+  }
+  .sample-picker {
+    display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .sample-btn {
+    flex: 1; min-width: 150px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid #d8d6cc; background: #fff; cursor: pointer;
+    font-size: 13px; text-align: left; transition: all 0.15s;
+  }
+  .sample-btn:hover { border-color: #a8a69c; }
+  .sample-btn.active { border-color: #3c3489; background: #eeedfe; }
+  .sample-btn .tag { font-size: 11px; color: #6b6a64; display: block; margin-top: 2px; }
+  .run-btn {
+    width: 100%; padding: 12px; border-radius: 8px; border: none;
+    background: #26215c; color: #fff; font-size: 14px; cursor: pointer;
+    margin-bottom: 24px;
+  }
+  .run-btn:disabled { background: #b4b2a9; cursor: not-allowed; }
+  .run-btn:hover:not(:disabled) { background: #3c3489; }
+
+  .node {
+    background: #fff; border: 1px solid #e2e0d8; border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 10px; opacity: 0.3;
+    transform: translateY(6px);
+    transition: opacity 0.4s ease, transform 0.4s ease, border-color 0.3s;
+  }
+  .node.show { opacity: 1; transform: translateY(0); }
+  .node.active { border-color: #7f77dd; }
+  .node-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .node-num {
+    width: 22px; height: 22px; border-radius: 50%; background: #eeedfe;
+    color: #3c3489; font-size: 12px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0; font-weight: 500;
+  }
+  .node-title { font-size: 14px; font-weight: 500; }
+  .node-body { font-size: 12.5px; color: #444441; padding-left: 30px; }
+  .kv { display: flex; gap: 6px; margin: 3px 0; flex-wrap: wrap; }
+  .kv .k { color: #6b6a64; min-width: 90px; flex-shrink: 0; }
+  .code-box {
+    background: #f8f7f3; border-radius: 6px; padding: 8px 10px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 11.5px;
+    color: #3c3634; white-space: pre-wrap; margin-top: 4px;
+  }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .bar-label { width: 78px; font-size: 12px; color: #6b6a64; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 8px; background: #e8e6de; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+  .bar-val { width: 20px; font-size: 12px; text-align: right; flex-shrink: 0; }
+
+  .badge {
+    display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 10px; font-weight: 500;
+  }
+  .badge.pass { background: #eaf3de; color: #27500a; }
+  .badge.fail { background: #fcebeb; color: #791f1f; }
+  .badge.warn { background: #faeeda; color: #633806; }
+
+  .final-box {
+    border-radius: 10px; padding: 16px; margin-top: 4px;
+    opacity: 0; transform: translateY(6px); transition: all 0.4s ease;
+  }
+  .final-box.show { opacity: 1; transform: translateY(0); }
+  .final-box.good { background: #eaf3de; border: 1px solid #97c459; }
+  .final-box.bad { background: #fcebeb; border: 1px solid #f09595; }
+  .final-box.edge { background: #faeeda; border: 1px solid #ef9f27; }
+  .final-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+  .final-desc { font-size: 12.5px; color: #444441; }
+
+  .footer-note {
+    margin-top: 24px; font-size: 12px; color: #8a887f; border-top: 1px solid #e2e0d8;
+    padding-top: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>视频版本评测 · 自动化初筛工作流 Demo</h1>
+  <p class="subtitle">抽帧 → VLM预标注 → 字段结构化 → 规则校验 → LLM-as-Judge初筛 → 置信度分流</p>
+
+  <div class="demo-note">
+    这是用于验证流程可行性的原型 demo，各节点的判断逻辑用规则模拟，未接入真实 VLM / LLM API。用于向团队说明分流思路，不作为生产环境实现。
+  </div>
+
+  <div class="sample-picker" id="samplePicker"></div>
+  <button class="run-btn" id="runBtn" onclick="runPipeline()">运行工作流</button>
+
+  <div id="pipeline"></div>
+  <div id="finalResult"></div>
+
+  <div class="footer-note">
+    Demo 版本 v0.1 · 三条模拟样本对应「高置信-明显好」「高置信-明显差（触发红线）」「低置信-边界」三种分流结果
+  </div>
+</div>
+
+<script>
+const samples = {
+  good: {
+    label: "样本A · 常规通过样本",
+    tag: "预期: 高置信-明显好",
+    prompt: "男子对镜头说\"今天天气真好\"，中景固定",
+    frames: ["首帧","中间帧×3","尾帧"],
+    vlmQA: [
+      ["画面中出现几个主体？", "1个"],
+      ["主体外观在各帧间是否一致？", "一致，无明显变化"],
+      ["镜头是否切换？", "未检测到切换"],
+      ["口型与语音是否同步？", "同步，误差较小"]
+    ],
+    structured: {"主体数量":1,"镜头切换次数":0,"服装一致性":"一致","口型同步_VLM初判":"良好"},
+    ruleCheck: {pass:true, msgs:["字段完整性: 通过","逻辑一致性: 通过（镜头切换0次，首尾帧场景一致）"]},
+    scores: {"指令遵循":4,"主体一致性":5,"音画匹配":5,"镜头语言":4},
+    judgeNote: "口型音节匹配度高，误差在0.1s以内，符合5分锚点定义",
+    confidence: "高",
+    confDetail: "各维度分数集中在4-5分，LLM依据文本明确无矛盾词",
+    route: "good"
+  },
+  bad: {
+    label: "样本B · 触发红线样本",
+    tag: "预期: 高置信-明显差",
+    prompt: "家电广告：冰箱旋转展示外观",
+    frames: ["首帧","旋转中段×2","尾帧"],
+    vlmQA: [
+      ["产品轮廓是否与参考图一致？", "存在明显形变，把手位置偏移"],
+      ["是否检测到部件增减？", "检测到侧面通风口缺失"],
+      ["镜头是否切换？", "未检测到切换"]
+    ],
+    structured: {"产品轮廓匹配度":"低","部件完整性":"缺失通风口","红线触发":"产品结构变形"},
+    ruleCheck: {pass:false, msgs:["红线字段检测: 触发「产品变形」","强制标记，跳过常规打分直接进入红线处理"]},
+    scores: {"主体还原度":1,"视觉稳定性":2,"商业可用性":1},
+    judgeNote: "触发红线项，不参与加权评分，直接判定不合格",
+    confidence: "高",
+    confDetail: "红线规则明确命中，判断依据无歧义",
+    route: "bad"
+  },
+  edge: {
+    label: "样本C · 边界样本",
+    tag: "预期: 低置信-边界",
+    prompt: "厨房内女子颠锅，油花溅起伴随声效",
+    frames: ["首帧","动作关键帧×2","尾帧"],
+    vlmQA: [
+      ["画面中锅铲/颠锅动作是否清晰？", "清晰，动作完整"],
+      ["声音与画面动作是否同步？", "可能略有偏差，无法确定具体时长"],
+      ["镜头是否切换？", "1次，中景转特写"]
+    ],
+    structured: {"动作完整性":"完整","音画同步_VLM初判":"存在不确定性","镜头切换次数":1},
+    ruleCheck: {pass:true, msgs:["字段完整性: 通过","逻辑一致性: 通过，但音画字段标记「不确定」，转入低置信判断"]},
+    scores: {"动作连续性":4,"音画匹配":3,"镜头语言":4},
+    judgeNote: "依据文本包含「可能」「无法确定」等模糊表述，触发低置信标记",
+    confidence: "低",
+    confDetail: "音画匹配分数落在3分边界档位，且LLM依据文本含不确定性词汇",
+    route: "edge"
+  }
+};
+
+let currentSample = 'good';
+
+function renderPicker() {
+  const el = document.getElementById('samplePicker');
+  el.innerHTML = Object.entries(samples).map(([key, s]) => `
+    <div class="sample-btn ${key===currentSample?'active':''}" onclick="selectSample('${key}')">
+      ${s.label}
+      <span class="tag">${s.tag}</span>
+    </div>
+  `).join('');
+}
+
+function selectSample(key) {
+  currentSample = key;
+  renderPicker();
+  document.getElementById('pipeline').innerHTML = '';
+  document.getElementById('finalResult').innerHTML = '';
+}
+
+function scoreColor(v) {
+  if (v >= 4) return '#639922';
+  if (v >= 3) return '#ef9f27';
+  return '#e24b4a';
+}
+
+async function runPipeline() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  const s = samples[currentSample];
+  const pipeline = document.getElementById('pipeline');
+  pipeline.innerHTML = '';
+  document.getElementById('finalResult').innerHTML = '';
+
+  const nodes = [
+    {
+      title: '① 抽帧',
+      body: `<div class="kv"><span class="k">输入prompt</span>${s.prompt}</div>
+             <div class="kv"><span class="k">抽帧策略</span>${s.frames.join(' · ')}</div>`
+    },
+    {
+      title: '② VLM 预标注',
+      body: s.vlmQA.map(([q,a]) => `<div class="kv"><span class="k">${q}</span>${a}</div>`).join('')
+    },
+    {
+      title: '③ 字段结构化',
+      body: `<div class="code-box">${JSON.stringify(s.structured, null, 2)}</div>`
+    },
+    {
+      title: '④ 规则校验',
+      body: `<div style="margin-bottom:6px"><span class="badge ${s.ruleCheck.pass?'pass':'fail'}">${s.ruleCheck.pass?'通过':'红线命中'}</span></div>
+             ${s.ruleCheck.msgs.map(m => `<div class="kv">· ${m}</div>`).join('')}`
+    },
+    {
+      title: '⑤ LLM-as-Judge 初筛',
+      body: Object.entries(s.scores).map(([dim,v]) => `
+        <div class="bar-row">
+          <span class="bar-label">${dim}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${v*20}%;background:${scoreColor(v)}"></div></div>
+          <span class="bar-val">${v}</span>
+        </div>
+      `).join('') + `<div class="kv" style="margin-top:6px"><span class="k">判断依据</span>${s.judgeNote}</div>`
+    },
+    {
+      title: '⑥ 置信度分流',
+      body: `<div style="margin-bottom:6px"><span class="badge ${s.confidence==='高'?'pass':'warn'}">置信度: ${s.confidence}</span></div>
+             <div class="kv">${s.confDetail}</div>`
+    }
+  ];
+
+  for (let i = 0; i < nodes.length; i++) {
+    const div = document.createElement('div');
+    div.className = 'node';
+    div.innerHTML = `
+      <div class="node-head">
+        <div class="node-num">${i+1}</div>
+        <div class="node-title">${nodes[i].title}</div>
+      </div>
+      <div class="node-body">${nodes[i].body}</div>
+    `;
+    pipeline.appendChild(div);
+    await new Promise(r => setTimeout(r, 60));
+    div.classList.add('show', 'active');
+    await new Promise(r => setTimeout(r, 550));
+    div.classList.remove('active');
+  }
+
+  const routeConfig = {
+    good: {cls:'good', title:'→ 分流结果: 高置信-明显好', desc:'直接采信 LLM 初判结果，进入抽检队列（约10-20%抽检比例），标注员只需确认或标异议。'},
+    bad: {cls:'bad', title:'→ 分流结果: 高置信-明显差（红线）', desc:'直接进入 Bad Case 库并标记严重度 P0，抽检确认后走归因流程，不占用正式评分人力。'},
+    edge: {cls:'edge', title:'→ 分流结果: 低置信-边界样本', desc:'强制转入正式复核队列，音画匹配维度默认高亮展开，需双人评分并可能触发仲裁。'}
+  };
+  const rc = routeConfig[s.route];
+  const fr = document.getElementById('finalResult');
+  fr.innerHTML = `<div class="final-box ${rc.cls}">
+    <div class="final-title">${rc.title}</div>
+    <div class="final-desc">${rc.desc}</div>
+  </div>`;
+  await new Promise(r => setTimeout(r, 60));
+  fr.querySelector('.final-box').classList.add('show');
+
+  btn.disabled = false;
+}
+
+renderPicker();
+</script>
+</body>
+</html>
